@@ -45,14 +45,19 @@ const COL_DEFS: ColDef<Verdict>[] = [
   { field: 'ts', headerName: 'Time', width: 100, cellRenderer: timeCell, sort: 'desc' },
   { field: 'package', headerName: 'Package', flex: 1, minWidth: 180 },
   { field: 'version', headerName: 'Version', width: 100 },
-  { field: 'label', headerName: 'Label', width: 110, cellRenderer: labelCell },
+  { field: 'label', headerName: 'Label', width: 120, cellRenderer: labelCell },
   { field: 'confidence', headerName: 'Confidence', width: 120, cellRenderer: confidenceCell },
   { field: 'persuasion', headerName: '⚠', width: 60, cellRenderer: persuasionCell },
-  { field: 'summary', headerName: 'Summary', flex: 2, minWidth: 280, wrapText: true, autoHeight: true },
+  {
+    field: 'summary', headerName: 'Summary', flex: 2, minWidth: 300,
+    cellStyle: { whiteSpace: 'normal', lineHeight: '1.4', paddingTop: 8, paddingBottom: 8 },
+    autoHeight: true,
+    tooltipField: 'summary',
+  },
   {
     field: 'hash', headerName: 'OTS Hash', width: 130,
     cellRenderer: (p: { value: string }) =>
-      p.value ? <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#6b7280' }}>{p.value.slice(0, 12)}…</span> : null
+      p.value ? <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#94a3b8' }}>{p.value.slice(0, 12)}…</span> : null
   },
 ]
 
@@ -148,9 +153,12 @@ export default function App() {
           rowData={rows}
           columnDefs={COL_DEFS}
           defaultColDef={{ resizable: true, sortable: true, filter: true }}
+          rowHeight={48}
           pagination
           paginationPageSize={20}
           domLayout="autoHeight"
+          tooltipShowDelay={300}
+          suppressColumnVirtualisation
           getRowId={r => `${r.data.package}@${r.data.version}@${r.data.ts}`}
         />
       </div>

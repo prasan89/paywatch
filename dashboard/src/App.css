@@ -8,9 +8,9 @@ body {
 }
 
 .app {
-  max-width: 1400px;
+  max-width: 100%;
   margin: 0 auto;
-  padding: 24px 20px;
+  padding: 20px 32px;
 }
 
 /* Header */
