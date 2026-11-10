@@ -143,7 +143,7 @@ export default function App() {
         {scanStatus && <span className="scan-status">{scanStatus}</span>}
       </div>
 
-      <div className="grid-wrapper ag-theme-quartz-dark">
+      <div className="grid-wrapper ag-theme-quartz">
         <AgGridReact<Verdict>
           rowData={rows}
           columnDefs={COL_DEFS}
