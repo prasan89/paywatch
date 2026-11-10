@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "serve dist -l $PORT"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0",
@@ -15,7 +16,8 @@
     "ag-grid-react": "^36.3.0",
     "lucide-react": "^1.70.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "serve": "^14.2.7"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
