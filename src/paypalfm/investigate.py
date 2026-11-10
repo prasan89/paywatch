@@ -20,8 +20,10 @@ from paypalfm.triage.content import _read_tarball
 META_BASE_URL = os.environ.get("META_API_BASE_URL", "https://api.meta.ai/v1")
 META_API_KEY = os.environ.get("META_API_KEY") or os.environ.get("MODEL_API_KEY", "")
 
-FAST_MODEL = "muse-spark-open-1.0"
+FAST_MODEL = "muse-spark-1.3"
 FULL_MODEL = "muse-spark-1.3"
+
+_MAX_TOKENS = 4096  # reasoning models need large budget before producing output
 
 _SYSTEM = """You are a security analyst reviewing an npm package for PayPal payment fraud.
 You will receive a numbered evidence bundle — excerpts of the package's source code and package.json.
@@ -99,7 +101,7 @@ def _call(model: str, bundle: str, name: str, version: str) -> Verdict:
     }
     payload = {
         "model": model,
-        "max_tokens": 512,
+        "max_tokens": _MAX_TOKENS,
         "messages": [
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": prompt},
@@ -118,17 +120,4 @@ def _call(model: str, bundle: str, name: str, version: str) -> Verdict:
 
 def investigate(name: str, version: str, pkg: dict, tarball: bytes | None = None) -> Verdict:
     bundle = _build_bundle(pkg, tarball)
-
-    # Stage 1 — Muse Spark Open (fast)
-    verdict = _call(FAST_MODEL, bundle, name, version)
-
-    # Stage 2 — Muse Spark full second opinion if uncertain or flagged
-    if verdict.confidence >= 0.5 or verdict.malicious:
-        try:
-            full_verdict = _call(FULL_MODEL, bundle, name, version)
-            if full_verdict.confidence > verdict.confidence or (full_verdict.malicious and not verdict.malicious):
-                verdict = full_verdict
-        except Exception:
-            pass  # fall back to fast model verdict
-
-    return verdict
+    return _call(FAST_MODEL, bundle, name, version)
