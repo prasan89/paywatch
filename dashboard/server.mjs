@@ -1,9 +1,9 @@
 import { createServer } from 'http'
 import { readFileSync, existsSync } from 'fs'
-import { join, extname } from 'path'
+import { join, extname, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
-const __dirname = fileURLToPath(new URL('.', import.meta.url))
+const __dirname = dirname(fileURLToPath(import.meta.url))
 const dist = join(__dirname, 'dist')
 const PORT = process.env.PORT || 3000
 
@@ -19,10 +19,16 @@ const mime = {
 }
 
 createServer((req, res) => {
-  let filePath = join(dist, req.url === '/' ? 'index.html' : req.url)
+  const url = req.url.split('?')[0]
+  let filePath = join(dist, url === '/' ? 'index.html' : url)
   if (!existsSync(filePath)) filePath = join(dist, 'index.html')
-  const ext = extname(filePath)
-  res.setHeader('Content-Type', mime[ext] || 'application/octet-stream')
-  res.setHeader('Cache-Control', ext === '.html' ? 'no-cache' : 'max-age=31536000')
-  res.end(readFileSync(filePath))
-}).listen(PORT, '0.0.0.0', () => console.log(`Serving on ${PORT}`))
+  try {
+    const ext = extname(filePath)
+    res.setHeader('Content-Type', mime[ext] || 'application/octet-stream')
+    res.setHeader('Cache-Control', ext === '.html' ? 'no-cache' : 'max-age=31536000')
+    res.end(readFileSync(filePath))
+  } catch {
+    res.writeHead(404)
+    res.end('Not found')
+  }
+}).listen(PORT, '0.0.0.0', () => console.log(`Serving dist from ${dist} on port ${PORT}`))
