@@ -20,7 +20,10 @@ from paypalfm.triage.content import _read_tarball
 HAIKU = "claude-haiku-4-5"
 SONNET = "claude-sonnet-4-5"
 
-_client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+_client = anthropic.Anthropic(
+    api_key=os.environ["ANTHROPIC_API_KEY"],
+    base_url=os.environ.get("ANTHROPIC_BASE_URL"),
+)
 
 _SYSTEM = """You are a security analyst reviewing an npm package for PayPal payment fraud.
 You will receive a numbered evidence bundle — excerpts of the package's source code and package.json.

@@ -10,12 +10,13 @@ import httpx
 from paypalfm.triage.typosquat import is_paypal_typosquat
 from paypalfm.popular import PAYPAL_PACKAGES
 
-NPM_FEED = "https://replicate.npmjs.com/_changes"
+NPM_SEARCH = "https://registry.npmjs.org/-/v1/search"
 NPM_REGISTRY = "https://registry.npmjs.org"
 
 KEYWORDS = {"paypal", "braintree", "venmo", "paypalsdk", "paypal-sdk", "paypal-checkout"}
 
 POLL_INTERVAL = 120  # seconds
+_SEARCH_QUERIES = ["paypal", "braintree", "venmo", "paypal checkout", "paypal sdk"]
 
 
 def _mentions_paypal(packument: dict) -> bool:
@@ -41,36 +42,56 @@ async def _fetch_packument(client: httpx.AsyncClient, name: str) -> dict | None:
 
 async def poll(since: int, callback) -> int:
     """
-    Poll npm feed from `since` sequence number.
-    Calls callback(name, version, packument) for each relevant new version.
-    Returns the last sequence number seen.
+    Search npm for PayPal-related packages using the search API.
+    Calls callback(name, version, packument) for each new/updated package.
+    Returns updated `since` timestamp.
     """
-    params = {"since": since, "limit": 500, "include_docs": "true"}
+    import time
+    seen: set[str] = set()
+    now = int(time.time())
+
     async with httpx.AsyncClient() as client:
-        r = await client.get(NPM_FEED, params=params, timeout=30)
-        r.raise_for_status()
-        data = r.json()
+        for query in _SEARCH_QUERIES:
+            try:
+                r = await client.get(
+                    NPM_SEARCH,
+                    params={"text": query, "size": 50},
+                    timeout=15,
+                )
+                r.raise_for_status()
+                objects = r.json().get("objects", [])
+                for obj in objects:
+                    pkg_meta = obj.get("package", {})
+                    name = pkg_meta.get("name", "")
+                    version = pkg_meta.get("version", "")
+                    if not name or not version or name in seen:
+                        continue
+                    seen.add(name)
 
-    last_seq = since
-    tasks = []
-    for result in data.get("results", []):
-        last_seq = result.get("seq", last_seq)
-        doc = result.get("doc", {})
-        if not doc or doc.get("_deleted"):
-            continue
-        name = doc.get("name", "")
-        if not _mentions_paypal(doc) and name not in PAYPAL_PACKAGES:
-            continue
-        versions = doc.get("versions", {})
-        dist_tags = doc.get("dist-tags", {})
-        latest = dist_tags.get("latest")
-        if latest and latest in versions:
-            tasks.append((name, latest, versions[latest]))
+                    # Only process packages updated since last poll
+                    date_str = pkg_meta.get("date", "")
+                    if date_str and since > 0:
+                        try:
+                            import datetime
+                            ts = int(datetime.datetime.fromisoformat(
+                                date_str.replace("Z", "+00:00")).timestamp())
+                            if ts <= since:
+                                continue
+                        except Exception:
+                            pass
 
-    for name, version, pkg in tasks:
-        await callback(name, version, pkg)
+                    # Fetch full packument for triage
+                    try:
+                        pr = await client.get(f"{NPM_REGISTRY}/{name}/{version}", timeout=10)
+                        pr.raise_for_status()
+                        pkg = pr.json()
+                        await callback(name, version, pkg)
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[monitor] search error for '{query}': {e}")
 
-    return last_seq
+    return now
 
 
 async def run_forever(callback):
