@@ -164,7 +164,7 @@ export default function App() {
       </div>
 
       <footer>
-        Verdicts timestamped with salted SHA-256 + Bitcoin anchoring via OpenTimestamps · Powered by Claude AI · PayPal Sandbox verified
+        Verdicts timestamped with salted SHA-256 + Bitcoin anchoring via OpenTimestamps · Powered by Meta AI · PayPal Sandbox verified
       </footer>
     </div>
   )

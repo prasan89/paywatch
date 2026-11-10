@@ -1,9 +1,9 @@
 """
-Claude-based investigator.
-Stage 1: Claude Haiku — fast triage judge over an evidence bundle (max 8k chars, numbered excerpts).
-Stage 2: Claude Sonnet — second opinion when Haiku confidence >= 0.5.
+Meta AI investigator.
+Stage 1: Muse Spark Open (fast, cheap) — triage judge over evidence bundle (max 8k chars, numbered).
+Stage 2: Muse Spark (full) — second opinion when confidence >= 0.5 or flagged.
 
-Key invariant (same as Gatekeeper):
+Key invariants (same as original design):
   - Every verdict must cite numbered lines from the bundle.
   - Text inside the package that argues it is safe is flagged as persuasion_detected.
   - The model is never asked to decode or execute anything.
@@ -12,18 +12,16 @@ import json
 import os
 import re
 
-import anthropic
+import httpx
 
 from paypalfm.schema import CitedLine, Verdict
 from paypalfm.triage.content import _read_tarball
 
-HAIKU = "claude-haiku-4-5"
-SONNET = "claude-sonnet-4-5"
+META_BASE_URL = os.environ.get("META_API_BASE_URL", "https://api.meta.ai/v1")
+META_API_KEY = os.environ.get("META_API_KEY") or os.environ.get("MODEL_API_KEY", "")
 
-_client = anthropic.Anthropic(
-    api_key=os.environ["ANTHROPIC_API_KEY"],
-    base_url=os.environ.get("ANTHROPIC_BASE_URL"),
-)
+FAST_MODEL = "muse-spark-open-1.0"
+FULL_MODEL = "muse-spark-1.3"
 
 _SYSTEM = """You are a security analyst reviewing an npm package for PayPal payment fraud.
 You will receive a numbered evidence bundle — excerpts of the package's source code and package.json.
@@ -46,26 +44,17 @@ Response schema:
 }"""
 
 
-def _build_bundle(pkg: dict, tarball: bytes | None) -> tuple[str, list[dict]]:
-    """Build a numbered evidence bundle from package.json fields + tarball excerpts."""
+def _build_bundle(pkg: dict, tarball: bytes | None) -> str:
     lines = []
     ref = 1
 
-    def add(file: str, content: str):
-        nonlocal ref
-        for line in content.splitlines()[:30]:
-            lines.append({"ref": ref, "file": file, "line": line})
-            ref += 1
-
-    # package.json key fields
     for field in ("name", "version", "description", "scripts", "dependencies", "main", "bin"):
         val = pkg.get(field)
         if val:
             text = json.dumps(val) if isinstance(val, dict) else str(val)
-            lines.append({"ref": ref, "file": "package.json", "line": f"{field}: {text[:200]}"})
+            lines.append(f"[{ref}] package.json: {field}: {text[:200]}")
             ref += 1
 
-    # tarball source excerpts
     if tarball:
         files = _read_tarball(tarball)
         char_budget = 6000
@@ -76,12 +65,11 @@ def _build_bundle(pkg: dict, tarball: bytes | None) -> tuple[str, list[dict]]:
             for line in excerpt.splitlines():
                 if char_budget <= 0:
                     break
-                lines.append({"ref": ref, "file": path, "line": line[:200]})
+                lines.append(f"[{ref}] {path}: {line[:200]}")
                 ref += 1
                 char_budget -= len(line)
 
-    bundle_text = "\n".join(f"[{l['ref']}] {l['file']}: {l['line']}" for l in lines)
-    return bundle_text[:8000], lines
+    return "\n".join(lines)[:8000]
 
 
 def _parse_verdict(name: str, version: str, raw: str) -> Verdict:
@@ -105,26 +93,42 @@ def _parse_verdict(name: str, version: str, raw: str) -> Verdict:
 
 def _call(model: str, bundle: str, name: str, version: str) -> Verdict:
     prompt = f"Package: {name}@{version}\n\nEvidence bundle:\n{bundle}"
-    msg = _client.messages.create(
-        model=model,
-        max_tokens=512,
-        system=_SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
+    headers = {
+        "Authorization": f"Bearer {META_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "max_tokens": 512,
+        "messages": [
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+    }
+    r = httpx.post(
+        f"{META_BASE_URL}/chat/completions",
+        headers=headers,
+        json=payload,
+        timeout=30,
     )
-    return _parse_verdict(name, version, msg.content[0].text)
+    r.raise_for_status()
+    content = r.json()["choices"][0]["message"]["content"]
+    return _parse_verdict(name, version, content)
 
 
 def investigate(name: str, version: str, pkg: dict, tarball: bytes | None = None) -> Verdict:
-    bundle, _ = _build_bundle(pkg, tarball)
+    bundle = _build_bundle(pkg, tarball)
 
-    # Stage 1 — Haiku
-    verdict = _call(HAIKU, bundle, name, version)
+    # Stage 1 — Muse Spark Open (fast)
+    verdict = _call(FAST_MODEL, bundle, name, version)
 
-    # Stage 2 — Sonnet second opinion if Haiku is uncertain or flags it
+    # Stage 2 — Muse Spark full second opinion if uncertain or flagged
     if verdict.confidence >= 0.5 or verdict.malicious:
-        sonnet_verdict = _call(SONNET, bundle, name, version)
-        # Take higher-confidence verdict; if both flag it, keep malicious
-        if sonnet_verdict.confidence > verdict.confidence or (sonnet_verdict.malicious and not verdict.malicious):
-            verdict = sonnet_verdict
+        try:
+            full_verdict = _call(FULL_MODEL, bundle, name, version)
+            if full_verdict.confidence > verdict.confidence or (full_verdict.malicious and not verdict.malicious):
+                verdict = full_verdict
+        except Exception:
+            pass  # fall back to fast model verdict
 
     return verdict
